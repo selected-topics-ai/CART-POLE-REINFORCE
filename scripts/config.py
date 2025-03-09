@@ -1,7 +1,7 @@
 import torch.optim as optim
 
 from dataclasses import dataclass
-from device import get_device
+from utils import get_device
 
 @dataclass
 class ReinforceConfig:

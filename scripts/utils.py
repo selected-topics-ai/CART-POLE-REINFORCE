@@ -2,21 +2,26 @@ import os
 import torch
 import random
 import numpy as np
-import torch.nn as nn
 
+from policy import PolicyNetwork
 from torch.distributions.categorical import Categorical
-from device import get_device
 
-def select_action(state: np.ndarray, policy: nn.Module, sample=True, device=get_device()) -> (int, torch.Tensor, torch.Tensor):
-    state = torch.from_numpy(state).float().unsqueeze(0).to(device)
-    probs, _ = policy(state)
-    probs = probs.to(device)
-    m = Categorical(probs=probs)
-    if sample:
-        action = m.sample()
-    else:
-        action = probs.argmax(dim=1)
-    return action.item(), m.log_prob(action), probs.squeeze(0)
+def get_device():
+    device = "cpu"
+    if torch.cuda.is_available():
+        device = "cuda"
+    if torch.mps.is_available():
+        device = "mps"
+
+    return device
+
+
+def select_action(state, policy: PolicyNetwork, device=get_device()):
+    state_tensor = torch.tensor(state, dtype=torch.float).to(device)
+    probs = policy(state_tensor)
+    dist = Categorical(probs)
+    action = dist.sample()
+    return action.item(), dist.log_prob(action), dist.entropy()
 
 
 def seed_everything(seed: int):

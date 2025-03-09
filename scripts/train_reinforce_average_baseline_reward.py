@@ -3,7 +3,7 @@ import torch.optim as optim
 
 from utils import get_device
 from policy import PolicyNetwork
-from scripts.reinforce_rloo import train
+from scripts.reinforce_average_reward import train
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
 if __name__ == '__main__':

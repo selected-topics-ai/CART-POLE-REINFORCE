@@ -1,118 +1,143 @@
 import os
 import torch
-import torch.nn as nn
+import wandb
 import numpy as np
 
-from scipy import stats
-from tqdm import tqdm
+from typing import List
 from gymnasium import Env
-from config import ReinforceConfig
-from utils import select_action
-from typing import List, Tuple
+from validation import validate
+from policy import PolicyNetwork
+from utils import get_device, select_action
+from torch.optim.lr_scheduler import LRScheduler
 
 
-def train_reinforce_with_ar_baseline(environment: Env, policy: nn.Module, config: ReinforceConfig):
+def train(policy: PolicyNetwork,
+          environment: Env,
+          total_episodes: int,
+          train_seeds: List[int],
+          eval_every_th_episode: int,
+          eval_seeds: List[int],
+          total_episode_steps: int,
+          gamma: float,
+          beta: float,
+          optimizer: torch.optim.Optimizer,
+          scheduler: LRScheduler=None,
+          log_to_wandb: bool = True,
+          device = get_device(),
+          trainer_name="cart-pole-average-reward-baseline",
+          ouput_dir: str = "./models"):
 
-    policy = policy.to(config.device)
+    policy.to(device)
 
-    episodes_reward = [] # Суммарная награда за каждый тренировочный эпизод
-    validation_rewards: List[List[float]] = [] # Списки наград за каждый валидационный эпизод для отслеживания дисперсии между эпизодами
-    validation_mean_rewards: List[float] = [] # Средняя награда за все валидационные эпизоды в рамках одного тренировочного эпизода
+    if log_to_wandb:
+        run = wandb.init(project=trainer_name,
+                         config={
+                             "lr": float(optimizer.param_groups[0]["lr"]),
+                             "total_episodes": total_episodes,
+                             "episode_steps_until_truncate": total_episode_steps,
+                             "beta": beta,
+                             "gamma": gamma,
+                         })
 
-    best_validation_rewards = [0.0] * config.validation_episodes
+    episodes = [i for i in range(total_episodes)]
 
-    train_seed = 1 # Будем менять в каждом эпизоде
+    if len(train_seeds) <= total_episodes:
+        train_seeds_ = train_seeds * (total_episodes // len(train_seeds)) + train_seeds[0:total_episodes % len(train_seeds)]
+    else:
+        train_seeds_ = train_seeds[0:total_episodes]
 
-    for episode in tqdm(range(config.episodes)):
+    current_min_validation_reward = 600
+
+    for episode, seed in zip(episodes, train_seeds_):
+
         policy.train()
-        state, _ = environment.reset(seed=train_seed)
 
+        episode_rewards = []
         log_probs = []
-        probs     = []
-        rewards   = []
+        entropies = []
 
-        step = 0
-        while True:
+        state, _ = environment.reset(seed=seed)
 
-            action, log_prob, prob = select_action(state, policy, device=config.device)
-            log_probs.append(log_prob)
-            probs.append(prob)
+        for step in range(total_episode_steps):
 
-            state, reward, terminate, truncated, _ = environment.step(action)
-            rewards.append(reward)
+            action, log_prob, entropy = select_action(state, policy)
+            next_state, reward, terminate, _, _ = environment.step(action)
 
             if terminate:
                 break
-            if step >= config.episode_steps_truncating:
-                break
-            step += 1
 
-        # Вычисляем дисконтированные награды для всех временных шагов
-        discounted_rewards = []
-        R_t = 0
-        for r in reversed(rewards):
-            R_t = float(r) + config.discount_factor * R_t
-            discounted_rewards.insert(0, R_t)
-        discounted_rewards = torch.tensor(discounted_rewards, dtype=torch.float32).to(config.device)
+            log_probs.append(log_prob)
+            episode_rewards.append(float(reward))
+            entropies.append(entropy.cpu().detach().item())
 
-        # Учет средней награды
-        average_reward = torch.tensor(rewards).mean()
-        advantage = discounted_rewards - average_reward
+            state = next_state
 
-        log_probs = torch.stack(log_probs, dim=-1).squeeze(0)
-        policy_loss = (-log_probs * advantage).mean()
+        G = 0
+        returns = []
+        for r in reversed(episode_rewards):
+            G = float(r) + gamma * G
+            returns.insert(0, G)
 
-        # Энтропийный регуляризатор
-        if config.entropy_regularization != 0.0:
-            probs = torch.stack(probs, dim=0)
-            entropy = -torch.sum(probs * torch.log(probs), dim=1)
-            policy_loss += config.entropy_regularization * entropy.mean()
+        avg_reward = np.mean(episode_rewards)
 
-        # Оптимизация
-        config.optimizer.zero_grad()
-        policy_loss.backward()
-        config.optimizer.step()
+        episode_losses = []
 
-        # Валидация
-        if episode % config.validate_every_th_episode == 0:
-            policy.eval()
-            with torch.no_grad():
-                validation_seed = config.episodes + 100
-                v = []
-                for val_episode in range(config.validation_episodes):
-                    state, _ = environment.reset(seed=validation_seed)
-                    val_episode_reward = []
-                    step = 0
-                    while True:
-                        action, log_prob, probs = select_action(state, policy, sample=False, device=config.device)
-                        state, reward, terminate, truncated, _ = environment.step(action)
-                        if terminate:
-                            break
-                        if step >= config.episode_steps_truncating:
-                            break
-                        step += 1
-                        val_episode_reward.append(reward)
-                    v.append(sum(val_episode_reward))
-                    validation_seed += 1
+        loss = 0
+        for log_prob, entropy, G in zip(log_probs, entropies, returns):
+            advantage = G - avg_reward
 
-                validation_rewards.append(v)
-                validation_mean = np.array(v).mean()
-                validation_std = np.array(v).std()
+            loss -= log_prob * advantage
+            loss -= beta * entropy
 
-                if len(best_validation_rewards) == 0 or validation_mean > np.mean(best_validation_rewards):
-                    t_statistic, p_value = stats.ttest_ind(v, best_validation_rewards)
-                    if p_value < 0.05 or (validation_std < np.std(best_validation_rewards)):
-                        torch.save(policy.state_dict(), os.path.join(config.save_path, f"{config.model_name}_entropy_{config.entropy_regularization}_best.pth"))
-                        print(f"Saved best model. Old best validation reward: {np.mean(best_validation_rewards)}, new best {validation_mean}")
-                        best_validation_rewards = v
-                    validation_mean_rewards.append(validation_mean - validation_std)
+            episode_losses.append(loss.item())
 
-                print(f"Episode: {episode}, reward: {sum(rewards)}, validation mean reward: {validation_mean}, validation std reward: {validation_std}")
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
 
-        episodes_reward.append(sum(rewards))
-        train_seed += 1
+        if scheduler is not None:
+            scheduler.step(episode)
 
-    model_metadata_save_path = f'{config.save_path}/{config.model_name}_entropy_{config.entropy_regularization}'
-    np.savetxt(f'{model_metadata_save_path}_episodes_reward.txt', np.array(episodes_reward), fmt='%d')
-    np.savetxt(f'{model_metadata_save_path}_validation_rewards.txt', np.array(validation_rewards), fmt='%d')
-    return episodes_reward, validation_rewards
+        if episode % eval_every_th_episode == 0:
+            val_total_episode_rewards, val_average_episodes_entropy = validate(policy=policy,
+                                                                       environment=environment,
+                                                                       eval_seeds=eval_seeds)
+
+            if log_to_wandb:
+                run.log({
+                    "val/avg_episode_reward": np.mean(val_total_episode_rewards),
+                    "val/min_episode_reward": np.min(val_total_episode_rewards),
+                    "val/avg_episode_entropy": np.mean(val_average_episodes_entropy),
+                }, step=episode)
+            else:
+                print(
+                    f'"val/avg_episode_reward": {np.mean(val_total_episode_rewards)}',
+                    f'val/min_episode_reward": {np.min(val_total_episode_rewards)}',
+                    f'"val/avg_episode_entropy": {np.mean(val_average_episodes_entropy)}'
+                )
+
+            # Save best checkpoint
+            min_val_reward = np.min(val_total_episode_rewards)
+            if min_val_reward > current_min_validation_reward:
+                checkpoint = {
+                    'episode': episode,
+                    'seed': seed,
+                    'policy': policy.state_dict(),
+                    'optimizer': optimizer.state_dict(),
+                    'scheduler': scheduler.state_dict(),
+                }
+                torch.save(checkpoint, os.path.join(ouput_dir, f'{trainer_name}-checkpoint-{episode}-val_reward-{min_val_reward}.pth'))
+                current_min_validation_reward = min_val_reward
+
+        if log_to_wandb:
+            run.log({
+                "train/avg_episode_loss": np.mean(episode_losses),
+                "train/total_episode_reward": np.sum(episode_rewards),
+                "train/avg_train_entropy": np.mean(entropies),
+            },  step=episode)
+        else:
+            print(
+                f'"train/avg_episode_loss": {np.mean(episode_losses)}',
+                f'"train/total_episode_reward": {np.sum(episode_rewards)}',
+                f'"train/avg_train_entropy": {np.mean(entropies)}'
+            )

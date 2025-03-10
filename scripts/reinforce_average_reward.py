@@ -126,7 +126,9 @@ def train(policy: PolicyNetwork,
                     'optimizer': optimizer.state_dict(),
                     'scheduler': scheduler.state_dict(),
                 }
-                torch.save(checkpoint, os.path.join(ouput_dir, f'{trainer_name}-checkpoint-{episode}-val_reward-{min_val_reward}.pth'))
+                format_entropy = str(beta).replace('.', '_')
+                checkpoint_name = f'{trainer_name}-checkpoint-{episode}-val_reward-{min_val_reward}-entropy-{format_entropy}.pth'
+                torch.save(checkpoint, os.path.join(ouput_dir, checkpoint_name))
                 current_min_validation_reward = min_val_reward
 
         if log_to_wandb:

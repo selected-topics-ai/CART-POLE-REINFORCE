@@ -123,11 +123,13 @@ def train(policy: PolicyNetwork,
             scheduler.step(episode)
 
         # Optimize value function
-        value_function_rewards_tensor = torch.tensor(value_function_rewards, dtype=torch.float).to(device)
-        returns_tensor = torch.tensor(returns, dtype=torch.float).to(device)
+        vf_loss = torch.Tensor([0.0]).to(device)
+        for ret, value_fuction_reward in zip(returns, value_function_rewards):
+            vf_loss += (value_fuction_reward - ret) ** 2
+
+        vf_loss /= len(returns)
 
         value_function_optimizer.zero_grad()
-        vf_loss = F.mse_loss(returns_tensor, value_function_rewards_tensor)
         vf_loss.backward()
         value_function_optimizer.step()
 
@@ -162,7 +164,9 @@ def train(policy: PolicyNetwork,
                     'optimizer': optimizer.state_dict(),
                     'scheduler': scheduler.state_dict(),
                 }
-                torch.save(checkpoint, os.path.join(ouput_dir, f'{trainer_name}-checkpoint-{episode}-val_reward-{min_val_reward}.pth'))
+                format_entropy = str(beta).replace('.', '_')
+                checkpoint_name = f'{trainer_name}-checkpoint-{episode}-val_reward-{min_val_reward}-entropy-{format_entropy}.pth'
+                torch.save(checkpoint, os.path.join(ouput_dir, checkpoint_name))
                 current_min_validation_reward = min_val_reward
 
         if log_to_wandb:
@@ -170,12 +174,12 @@ def train(policy: PolicyNetwork,
                 "train/avg_episode_loss": np.mean(episode_losses),
                 "train/total_episode_reward": np.sum(episode_rewards),
                 "train/avg_train_entropy": np.mean(entropies),
-                "train/avg_value_function_rewards": np.mean(value_function_rewards),
+                "train/avg_value_function_rewards": torch.Tensor(value_function_rewards).cpu().detach().mean().item(),
             },  step=episode)
         else:
             print(
                 f'"train/avg_episode_loss": {np.mean(episode_losses)}',
                 f'"train/total_episode_reward": {np.sum(episode_rewards)}',
                 f'"train/avg_train_entropy": {np.mean(entropies)}',
-                f'train/avg_value_function_rewards": {np.mean(value_function_rewards)}',
+                f'train/avg_value_function_rewards": {torch.Tensor(value_function_rewards).cpu().detach().mean().item()}',
             )

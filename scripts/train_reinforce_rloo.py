@@ -1,12 +1,14 @@
 import gymnasium as gym
 import torch.optim as optim
 
-from utils import get_device
 from policy import PolicyNetwork
 from scripts.reinforce_rloo import train
+from utils import get_device, seed_everything
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
 if __name__ == '__main__':
+
+    seed_everything(42)
 
     total_episodes = 2_000
     train_seeds = [i for i in range(total_episodes // 10)]
@@ -15,13 +17,14 @@ if __name__ == '__main__':
     total_episode_steps_until_truncation = 1_000
 
     gamma = 0.99
-    betas = [0.0, 0.001, 0.01, 0.1]
+    betas = [0.001, 0.01, 0.1, 1.0]
+
 
     env = gym.make("CartPole-v1")
 
     policy = PolicyNetwork().to(get_device())
 
-    optimizer = optim.Adam(policy.parameters(), lr=1e-3)
+    optimizer = optim.Adam(policy.parameters(), lr=1e-2)
     scheduler = CosineAnnealingLR(optimizer, eta_min=1e-5, T_max=total_episodes)
 
     for beta in betas:

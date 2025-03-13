@@ -7,7 +7,7 @@ from utils import get_device, select_action
 
 if __name__ == '__main__':
 
-    seed = 100_001
+    seed = 42
     steps = 500
     video_folder = '../data/video'
     policy_checkpoint_path = 'models/behavioral-cloning-without-position-steps-checkpoint-30-val_reward-203.0.pth'

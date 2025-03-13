@@ -33,7 +33,7 @@ if __name__ == "__main__":
     states = np.loadtxt('../data/states.txt')
     actions = np.loadtxt('../data/actions.txt')
 
-    N = [1000, 5000, 10000, 50000]
+    N = [1000]
     epochs = 100
 
     for n in N:

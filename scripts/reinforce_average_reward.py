@@ -5,6 +5,7 @@ import numpy as np
 
 from typing import List
 from gymnasium import Env
+from datetime import datetime
 from validation import validate
 from policy import PolicyNetwork
 from utils import get_device, select_action
@@ -31,6 +32,7 @@ def train(policy: PolicyNetwork,
 
     if log_to_wandb:
         run = wandb.init(project=trainer_name,
+                         name=f"{trainer_name}-{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}",
                          config={
                              "lr": float(optimizer.param_groups[0]["lr"]),
                              "total_episodes": total_episodes,
@@ -143,3 +145,6 @@ def train(policy: PolicyNetwork,
                 f'"train/total_episode_reward": {np.sum(episode_rewards)}',
                 f'"train/avg_train_entropy": {np.mean(entropies)}'
             )
+
+    if log_to_wandb:
+        wandb.finish()

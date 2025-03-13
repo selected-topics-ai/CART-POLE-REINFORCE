@@ -18,7 +18,7 @@ if __name__ == '__main__':
     total_episode_steps_until_truncation = 1_000
 
     gamma = 0.99
-    betas = [0.001, 0.01, 0.1, 1.0]
+    betas = [0.0, 0.001, 0.01, 0.1, 1.0]
 
     env = gym.make("CartPole-v1")
 

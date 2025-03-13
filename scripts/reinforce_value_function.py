@@ -5,8 +5,10 @@ import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
 
+from tqdm import tqdm
 from typing import List
 from gymnasium import Env
+from datetime import datetime
 from validation import validate
 from policy import PolicyNetwork
 from utils import select_action, get_device
@@ -49,6 +51,7 @@ def train(policy: PolicyNetwork,
 
     if log_to_wandb:
         run = wandb.init(project=trainer_name,
+                         name=f"{trainer_name}-{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}",
                          config={
                              "lr": float(optimizer.param_groups[0]["lr"]),
                              "value_function_lr": float(value_function_optimizer.param_groups[0]["lr"]),
@@ -67,7 +70,7 @@ def train(policy: PolicyNetwork,
 
     current_min_validation_reward = 600
 
-    for episode, seed in zip(episodes, train_seeds_):
+    for episode, seed in tqdm(zip(episodes, train_seeds_)):
 
         policy.train()
         value_function.train()
@@ -183,3 +186,6 @@ def train(policy: PolicyNetwork,
                 f'"train/avg_train_entropy": {np.mean(entropies)}',
                 f'train/avg_value_function_rewards": {torch.Tensor(value_function_rewards).cpu().detach().mean().item()}',
             )
+
+    if log_to_wandb:
+        wandb.finish()

@@ -1,3 +1,5 @@
+import os
+import torch
 import wandb
 import numpy as np
 
@@ -39,6 +41,8 @@ def train(policy: PolicyNetwork,
                              "sample_size": sample_size,
                          })
 
+    current_min_validation_reward = 0
+
     for epoch in range(epochs):
         policy.to(device=device)
 
@@ -72,6 +76,18 @@ def train(policy: PolicyNetwork,
              eval_average_episodes_entropy) = validate(environment=environment,
                                                       policy=policy,
                                                       eval_seeds=eval_seeds)
+
+            # Save best checkpoint
+            min_val_reward = np.min(eval_total_episode_rewards)
+            if min_val_reward > current_min_validation_reward:
+                checkpoint = {
+                    'epoch': epoch,
+                    'policy': policy.state_dict(),
+                    'optimizer': optimizer.state_dict(),
+                }
+                checkpoint_name = f'{trainer_name}-checkpoint-{epoch}-val_reward-{min_val_reward}.pth'
+                torch.save(checkpoint, os.path.join('./models', checkpoint_name))
+                current_min_validation_reward = min_val_reward
 
             run.log({
                 "val/source/avg_episode_reward": np.mean(source_total_episode_rewards),

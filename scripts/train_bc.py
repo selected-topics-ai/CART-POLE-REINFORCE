@@ -33,6 +33,18 @@ if __name__ == "__main__":
     states = np.loadtxt('../data/states.txt')
     actions = np.loadtxt('../data/actions.txt')
 
+    filtered_states = []
+    filtered_actions = []
+
+    for state, action in zip(states, actions):
+        position = state[0]
+        if (position < 1.0) and (position > -1.0):
+            filtered_states.append(state)
+            filtered_actions.append(action)
+
+    states = np.array(filtered_states)
+    actions = np.array(filtered_actions)
+
     N = [1000]
     epochs = 100
 
@@ -59,4 +71,5 @@ if __name__ == "__main__":
               train_loader=dataloader,
               eval_seeds=useen_seeds,
               source_seeds=source_seeds,
-              sample_size=n,)
+              sample_size=n,
+              trainer_name='behavioral-cloning-without-position-steps',)
